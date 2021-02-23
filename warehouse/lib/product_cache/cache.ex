@@ -23,14 +23,14 @@ defmodule ProductCache.Cache do
   @impl true
   def init(_args) do
     # TODO: use supervisor and allocate downloader dynamically
-    downloaders =
-      Enum.map(0..10, fn i ->
-        {:ok, downloader} = Downloader.start_link(name: "Worker#{i}")
-        downloader
-      end)
+    for i <- 0..10 do
+      {:ok, _pid} = Downloader.start_link(name: "Worker#{i}", queue: self())
+    end
+
     state = %{
       # workers
-      downloaders: downloaders,
+      ready_downloaders: :queue.new,
+      request_queue: :queue.new,
       # cache times
       categories: [], # [{category, next_update}, ...]
       availability: [], # [{manufacturer, next_update}, ...]
@@ -41,6 +41,8 @@ defmodule ProductCache.Cache do
     }
     {:ok, state}
   end
+
+  # Calls from the application
 
   @impl true
   def handle_call(:categories, from, %{categories: categories} = state) do
@@ -78,10 +80,19 @@ defmodule ProductCache.Cache do
     end
   end
 
+  # Replies from downloaders
+
   @impl true
-  def handle_cast({:update, :categories = request, categories},
+  def handle_cast({:ready, downloader}, state) do
+    {:noreply, downloader_ready(downloader, state)}
+  end
+
+  @impl true
+  def handle_cast({:ready, downloader, :categories = request, categories},
                   %{categories: existing_categories} = state)
   do
+    state = downloader_ready(downloader, state)
+
     now = System.monotonic_time()
     category_times =
       categories
@@ -91,6 +102,7 @@ defmodule ProductCache.Cache do
           _ -> {category, now}
         end
       end)
+
     data_func = fn -> Enum.sort(categories) end
     state = reply_to_waiters(request, data_func, state)
     state = schedule_updater(request, @cache_time, state)
@@ -98,9 +110,11 @@ defmodule ProductCache.Cache do
   end
 
   @impl true
-  def handle_cast({:update, {:products, category} = request, product_updates},
+  def handle_cast({:ready, downloader, {:products, category} = request, product_updates},
                   %{categories: categories, products: products} = state)
   do
+    state = downloader_ready(downloader, state)
+
     update_delta = System.convert_time_unit(@cache_time, :millisecond, :native)
     next_update = System.monotonic_time() + update_delta
     categories = merge_cache_time(categories, category, next_update)
@@ -161,9 +175,11 @@ defmodule ProductCache.Cache do
   end
 
   @impl true
-  def handle_cast({:update, {:availability, manufacturer} = request, availability_updates},
+  def handle_cast({:ready, downloader, {:availability, manufacturer} = request, availability_updates},
                   %{availability: availability, products: products} = state)
   do
+    state = downloader_ready(downloader, state)
+
     update_delta = System.convert_time_unit(trunc(@cache_time * 0.9), :millisecond, :native)
     next_update = System.monotonic_time() + update_delta
     availability = merge_cache_time(availability, manufacturer, next_update)
@@ -203,7 +219,8 @@ defmodule ProductCache.Cache do
   end
 
   @impl true
-  def handle_cast({:error, request, reason}, state) do
+  def handle_cast({:error, downloader, request, reason}, state) do
+    state = downloader_ready(downloader, state)
     Logger.warn(module: __MODULE__, message: "request update failed", request: request)
     state = reply_to_waiters(request, (fn -> {:error, reason} end), state)
     {:noreply, state}
@@ -241,6 +258,53 @@ defmodule ProductCache.Cache do
     end)
   end
 
+
+  ## Cache time management
+
+  defp schedule_updater(request, after_ms, %{update_timers: timers} = state) do
+    case timers do
+      %{^request => _ref} ->
+        state
+
+      _ ->
+        ref = Process.send_after(self(), {:self_update, request}, after_ms)
+        timers = Map.put(timers, request, ref)
+        %{state | update_timers: timers}
+    end
+  end
+
+  defp cache_time_elapsed?(times, key) do
+    case List.keyfind(times, key, 0) do
+      nil -> :missing
+      {^key, next_update} ->
+        if next_update > System.monotonic_time(), do: :ok, else: :elapsed
+    end
+  end
+
+  defp merge_cache_time(times, key, time) do
+    times = List.keydelete(times, key, 0)
+    keylist_insert(times, key, time)
+  end
+
+  # Inserts a key to a list, so that the list is kept sorted by the value.
+  # In other words, the list is a min heap.
+  # Because the list is always sorted, the insertion cost is O(n).
+  defp keylist_insert([], key, value) do
+    [{key, value}]
+  end
+
+  defp keylist_insert([{_, top} | _] = list, key, value) when value < top do
+    [{key, value} | list]
+  end
+
+  defp keylist_insert([head | tail], key, value) do
+    [head | keylist_insert(tail, key, value)]
+  end
+
+
+  ## Management for active GenServer.call requests
+  # this is between the cache and the application
+
   defp reply_after_update(from, request, %{waiting: waiting} = state) do
     case waiting do
       %{^request => waiters} ->
@@ -249,8 +313,7 @@ defmodule ProductCache.Cache do
 
       %{} ->
         # no active update
-        {:ok, downloader, state} = next_downloader(state)
-        :ok = GenServer.cast(downloader, {request, self()})
+        state = queue_or_handle_request(request, state)
         %{state | waiting: Map.put(waiting, request, [from])}
     end
   end
@@ -271,45 +334,39 @@ defmodule ProductCache.Cache do
     end
   end
 
-  defp schedule_updater(request, after_ms, %{update_timers: timers} = state) do
-    case timers do
-      %{^request => _ref} ->
-        state
 
-      _ ->
-        ref = Process.send_after(self(), {:self_update, request}, after_ms)
-        timers = Map.put(timers, request, ref)
-        %{state | update_timers: timers}
+  ## Request queue management, i.e., task queue for downloaders
+  # this is between the cache and downloaders
+
+  defp queue_or_handle_request(request, %{ready_downloaders: downloaders, request_queue: requests} = state) do
+    if :queue.is_empty(requests) and not :queue.is_empty(downloaders) do
+      {{:value, downloader}, downloaders} = :queue.out(downloaders)
+      :ok = GenServer.cast(downloader, {request, self()})
+      %{state | ready_downloaders: downloaders}
+    else
+      %{state | request_queue: :queue.in(request, requests)}
     end
   end
 
-  defp next_downloader(%{downloaders: downloaders} = state) do
-    [next | tail] = downloaders
-    {:ok, next, %{state | downloaders: tail ++ [next]}}
+  defp downloader_ready(downloader, %{ready_downloaders: downloaders, request_queue: requests} = state) do
+    downloaders = :queue.in(downloader, downloaders)
+    {downloaders, requests} = feed_downloaders(downloaders, requests)
+    %{state | ready_downloaders: downloaders, request_queue: requests}
   end
 
-  defp cache_time_elapsed?(times, key) do
-    case List.keyfind(times, key, 0) do
-      nil -> :missing
-      {^key, next_update} ->
-        if next_update > System.monotonic_time(), do: :ok, else: :elapsed
+  #defp feed_downloaders(%{ready_downloaders: downloaders, request_queue: requests} = state) do
+  #  {downloaders, requests} = feed_downloaders(downloaders, requests)
+  #  %{state | ready_downloaders: downloaders, request_queue: requests}
+  #end
+
+  defp feed_downloaders(downloaders, requests) do
+    if not :queue.is_empty(downloaders) and not :queue.is_empty(requests) do
+      {{:value, downloader}, downloaders} = :queue.out(downloaders)
+      {{:value, request}, requests} = :queue.out(requests)
+      :ok = GenServer.cast(downloader, {request, self()})
+      feed_downloaders(downloaders, requests)
+    else
+      {downloaders, requests}
     end
-  end
-
-  defp merge_cache_time(times, key, time) do
-    times = List.keydelete(times, key, 0)
-    keylist_merge_insert(times, key, time)
-  end
-
-  defp keylist_merge_insert([], key, value) do
-    [{key, value}]
-  end
-
-  defp keylist_merge_insert([{_, top} | _] = list, key, value) when value < top do
-    [{key, value} | list]
-  end
-
-  defp keylist_merge_insert([head | tail], key, value) do
-    [head | keylist_merge_insert(tail, key, value)]
   end
 end

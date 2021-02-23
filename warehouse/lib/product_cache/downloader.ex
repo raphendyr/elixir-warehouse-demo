@@ -15,9 +15,13 @@ defmodule ProductCache.Downloader do
   end
 
   @impl true
-  def init(_) do
+  def init([queue: queue]) do
     {:ok, client} = ApiClient.new()
-    {:ok, %{client: client}}
+    :ok = GenServer.cast(queue, {:ready, self()})
+    {:ok, %{
+      client: client,
+      queue: queue,
+    }}
   end
 
 
@@ -55,11 +59,11 @@ defmodule ProductCache.Downloader do
         else
           Logger.info(module: __MODULE__, request: request, status: :ok, data: data)
         end
-        GenServer.cast(cache, {:update, request, data})
+        GenServer.cast(cache, {:ready, self(), request, data})
 
       {:error, reason} ->
         Logger.info(module: __MODULE__, request: request, status: :error, reason: reason)
-        GenServer.cast(cache, {:error, request, reason})
+        GenServer.cast(cache, {:error, self(), request, reason})
     end
   end
 end
