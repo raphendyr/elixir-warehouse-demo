@@ -227,9 +227,12 @@ defmodule ProductCache.Cache do
   end
 
   @impl true
-  def handle_info({:self_update, request}, state) do
+  def handle_info({:self_update, request}, %{update_timers: timers} = state) do
     # TODO: only if still relevant...
-    {:noreply, reply_after_update(:self, request, state)}
+    Logger.info(module: __MODULE__, action: :self_update, request: request)
+    state = %{state | update_timers: Map.delete(timers, request)}
+    state = reply_after_update(:self, request, state)
+    {:noreply, state}
   end
 
 
