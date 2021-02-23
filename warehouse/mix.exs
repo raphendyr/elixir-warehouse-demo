@@ -43,6 +43,9 @@ defmodule Warehouse.MixProject do
       {:gettext, "~> 0.11"},
       {:jason, "~> 1.0"},
       {:plug_cowboy, "~> 2.0"},
+      # Phoenix LiveView
+      #{:phoenix_live_view, "~> 0.15.4"},
+      {:floki, ">= 0.27.0", only: :test},
       # Ecto
       {:phoenix_ecto, "~> 4.1"},
       {:ecto_sql, "~> 3.4"},
