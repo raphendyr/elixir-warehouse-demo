@@ -1,0 +1,37 @@
+<h1>Show Product</h1>
+
+<ul>
+
+  <li>
+    <strong>Id:</strong>
+    <%= @product.id %>
+  </li>
+
+  <li>
+    <strong>Type:</strong>
+    <%= @product.type %>
+  </li>
+
+  <li>
+    <strong>Name:</strong>
+    <%= @product.name %>
+  </li>
+
+  <li>
+    <strong>Price:</strong>
+    <%= @product.price %>
+  </li>
+
+  <li>
+    <strong>Availability:</strong>
+    <%= @product.availability %>
+  </li>
+
+  <li>
+    <strong>Manufacturer:</strong>
+    <%= @product.manufacturer %>
+  </li>
+
+</ul>
+
+<span><%= link "Back", to: Routes.product_path(@conn, :index, @product.type) %></span>

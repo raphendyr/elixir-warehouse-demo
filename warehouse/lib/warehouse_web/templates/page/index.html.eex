@@ -1,0 +1,33 @@
+<section class="phx-hero">
+  <h1><%= gettext "Welcome to %{name}!", name: "Warehouse" %></h1>
+</section>
+
+<section class="row">
+  <article class="column">
+    <h2>Products</h2>
+    <ul>
+      <%= for category <- @categories do %>
+        <li>
+          <%= link category.name, to: Routes.product_path(@conn, :index, category) %>
+        </li>
+      <% end %>
+    </ul>
+  </article>
+  <article class="column">
+    <h2>Recources & Help</h2>
+    <ul>
+      <li>
+        <a href="https://hexdocs.pm/phoenix/overview.html">Guides &amp; Docs</a>
+      </li>
+      <li>
+        <a href="https://github.com/phoenixframework/phoenix">Source</a>
+      </li>
+      <li>
+        <a href="https://github.com/phoenixframework/phoenix/blob/v1.5/CHANGELOG.md">v1.5 Changelog</a>
+      </li>
+      <li>
+        <a href="https://elixir-slackin.herokuapp.com/">Elixir on Slack</a>
+      </li>
+    </ul>
+  </article>
+</section>

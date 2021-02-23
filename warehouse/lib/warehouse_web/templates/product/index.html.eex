@@ -1,0 +1,30 @@
+<h1>Listing Products from category <%= @category %></h1>
+
+<table>
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Price</th>
+      <th>Availability</th>
+      <th>Manufacturer</th>
+      <th>Id</th>
+
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+<%= for product <- @products do %>
+    <tr>
+      <td><%= product.name %></td>
+      <td><%= product.price %></td>
+      <td><%= product.availability %></td>
+      <td><%= product.manufacturer %></td>
+      <td><%= product.id %></td>
+
+      <td>
+        <span><%= link "Show", to: Routes.product_path(@conn, :show, product) %></span>
+      </td>
+    </tr>
+<% end %>
+  </tbody>
+</table>
