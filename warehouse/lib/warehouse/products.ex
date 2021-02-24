@@ -14,6 +14,11 @@ defmodule Warehouse.Products do
     categories
   end
 
+  @doc false
+  def async_categories() do
+    ProductCache.async_categories()
+  end
+
   @doc """
   Returns the list of products.
 
@@ -35,6 +40,11 @@ defmodule Warehouse.Products do
           list_products(category, true)
         end
     end
+  end
+
+  @doc false
+  def async_products(category) do
+    ProductCache.async_products(category)
   end
 
   @doc """

@@ -1,6 +1,7 @@
 defmodule ProductCache.Cache do
   use GenServer
 
+  alias Phoenix.PubSub
   alias Ecto.Changeset
   alias ProductCache.Downloader
   alias Warehouse.Products.Product
@@ -28,16 +29,20 @@ defmodule ProductCache.Cache do
     end
 
     state = %{
+      # internal database (TODO: replace with ETS)
+      products: %{}, # %{id => %Product{}, ...}
       # workers
       ready_downloaders: :queue.new,
       request_queue: :queue.new,
       # cache times
       categories: [], # [{category, next_update}, ...]
       availability: [], # [{manufacturer, next_update}, ...]
-      products: %{}, # %{id => %Product{}, ...}
-      # other
+      # list of waiters, i.e., what messages to send when updates are received
       waiting: %{}, # %{request => [waiting call requests]}
+      # automatic updates
       update_timers: %{}, # %{request => send_after_ref}
+      monitors: %{}, # %{pid => monitor_ref}
+      last_heartbeat: System.monotonic_time(),
     }
     {:ok, state}
   end
@@ -46,22 +51,24 @@ defmodule ProductCache.Cache do
 
   @impl true
   def handle_call(:categories, from, %{categories: categories} = state) do
-    Logger.info(module: __MODULE__, request: :categories)
+    Logger.info(module: __MODULE__, call: :categories)
+    state = heartbeat(state)
     case categories do
-      [] -> {:noreply, reply_after_update(from, :categories, state)}
+      [] -> {:noreply, reply_after_update({:reply, from}, :categories, state)}
       _ -> {:reply, {:ok, categories(state)}, state}
     end
   end
 
   @impl true
   def handle_call({:products, category}, from, %{categories: categories} = state) do
-    Logger.info(module: __MODULE__, request: {:products, category})
+    Logger.info(module: __MODULE__, call: {:products, category})
+    state = heartbeat(state)
     case cache_time_elapsed?(categories, category) do
       :ok ->
         {:reply, {:ok, products(category, state)}, state}
 
       :elapsed ->
-        {:noreply, reply_after_update(from, {:products, category}, state)}
+        {:noreply, reply_after_update({:reply, from}, {:products, category}, state)}
 
       :missing ->
         {:reply, {:error, :unknown_category}, state}
@@ -70,13 +77,39 @@ defmodule ProductCache.Cache do
 
   @impl true
   def handle_call({:product, id}, _from, %{products: products} = state) do
-    Logger.info(module: __MODULE__, request: {:product, id})
+    Logger.info(module: __MODULE__, call: {:product, id})
+    state = heartbeat(state)
     case Map.get(products, id) do
       %Product{} = product ->
         {:reply, {:ok, product}, state}
 
       nil ->
         {:reply, {:error, :not_found}, state}
+    end
+  end
+
+  @impl true
+  def handle_cast({:categories, pid}, %{categories: categories} = state) do
+    Logger.info(module: __MODULE__, cast: :categories, pid: pid)
+    state = monitor_client(pid, state)
+    async_reply(pid, :categories, categories(state))
+    if Enum.empty? categories do
+      {:noreply, reply_after_update({:async, pid}, :categories, state)}
+    else
+      {:noreply, state}
+    end
+  end
+
+  @impl true
+  def handle_cast({:products, category, pid}, %{categories: categories} = state) do
+    request = {:products, category}
+    Logger.info(module: __MODULE__, cast: request, pid: pid)
+    state = monitor_client(pid, state)
+    async_reply(pid, request, products(category, state))
+    if cache_time_elapsed?(categories, category) == :elapsed do
+      {:noreply, reply_after_update({:async, pid}, {:products, category}, state)}
+    else
+      {:noreply, state}
     end
   end
 
@@ -115,64 +148,88 @@ defmodule ProductCache.Cache do
   do
     state = downloader_ready(downloader, state)
 
+    # record the time of cache expiration
     update_delta = System.convert_time_unit(@cache_time, :millisecond, :native)
     next_update = System.monotonic_time() + update_delta
     categories = merge_cache_time(categories, category, next_update)
     state = %{state | categories: categories}
 
-    # construct %Product{} structs from the update and merge with existing data
-    # validates the update data
-    updated =
+    # Generate changesets and validate
+    updated_products =
       product_updates
-      |> Enum.map(fn update ->
-        old_or_new =
-          case Map.get(products, update["id"]) do
-            %Product{} = product -> product
-            _ -> %Product{}
-          end
-        changeset = Product.changeset(old_or_new, update)
-        if changeset.valid? do
-          # NOTE: changeset.changes is empty if data is the same
-          Changeset.apply_changes(changeset)
-        else
-          errors = Warehouse.ChangesetHelpers.changeset_errors(changeset)
+      |> product_changesets(products)
+      |> Enum.filter(fn
+        {:changeset, _} -> true
+        {:product, _} -> true
+        {:error, errors} ->
           Logger.warn(module: __MODULE__, update: request, error: :invalid_data, errors: errors)
-          nil
-        end
+          false
       end)
-      |> Enum.filter(& not is_nil(&1))
+      |> Enum.map(fn
+        {:changeset, cs} -> {:changed, Changeset.apply_changes(cs)}
+        {:product, product} -> {:existing, product}
+      end)
+    changed_products =
+      updated_products
+      |> Enum.filter(fn
+        {:changed, _} -> true
+        _ -> false
+      end)
+      |> Enum.map(fn {_, product} -> product end)
 
     # remove products for this category, which are not part of the update
-    ids = updated |> Enum.map(& &1.id) |> MapSet.new
-    products =
+    ids =
+      Enum.reduce(updated_products, MapSet.new, fn {_, product}, acc ->
+        MapSet.put(acc, product.id)
+      end)
+    {removed_products, products} =
       products
-      |> Enum.filter(fn {id, product} ->
-        product.type != category || MapSet.member?(ids, id)
-      end)
-      |> Map.new
+      |> Enum.split_with(fn {id, p} -> p.type == category and not MapSet.member?(ids, id) end)
+      |> (fn {removed, kept} ->
+        {Enum.map(removed, &elem(&1, 1)), Map.new(kept)}
+      end).()
 
-    # update products map
-    products =
-      Enum.reduce(updated, products, fn product, products ->
-        Map.put(products, product.id, product)
-      end)
+    if not Enum.empty?(removed_products) do
+      Logger.warn(module: __MODULE__, update: request, removed_count: Enum.count(removed_products))
+    end
 
+    # update products Map
+    products = Enum.reduce(changed_products, products, &Map.put(&2, &1.id, &1))
     state = %{state | products: products}
 
     # check manufacturer updates
     manufacturers =
-      updated
-      |> Enum.reduce(MapSet.new, fn product, manufacturers ->
-        MapSet.put(manufacturers, product.manufacturer)
+      updated_products
+      |> Enum.reduce(MapSet.new, fn {_, product}, acc ->
+        MapSet.put(acc, product.manufacturer)
       end)
-
+      |> MapSet.to_list
     state = request_availability_updates(manufacturers, state)
 
+    # reply to waiters
     data_func = fn -> products(category, state) end
     state = reply_to_waiters(request, data_func, state)
+
+    # broadcast updated products
+    changed_products
+    |> Enum.group_by(& &1.type)
+    |> Enum.each(fn {category, products} ->
+      PubSub.broadcast(Warehouse.PubSub, "products:#{category}",
+        {:updated_products, category, products})
+    end)
+
+    # broadcast removed products
+    removed_products
+    |> Enum.group_by(& &1.type)
+    |> Enum.each(fn {category, products} ->
+      PubSub.broadcast(Warehouse.PubSub, "products:#{category}",
+        {:removed_products, category, products})
+    end)
+
     state = schedule_updater(request, @cache_time, state)
     {:noreply, state}
   end
+
 
   @impl true
   def handle_cast({:ready, downloader, {:availability, manufacturer} = request, availability_updates},
@@ -185,35 +242,34 @@ defmodule ProductCache.Cache do
     availability = merge_cache_time(availability, manufacturer, next_update)
     state = %{state | availability: availability}
 
-    updates =
-      Enum.map(availability_updates, fn update ->
-        old_or_new =
-          case Map.get(products, update["id"]) do
-            %Product{} = product -> product
-            _ -> %Product{}
-          end
-        update = Map.put(update, "manufacturer", manufacturer)
-        changeset = Product.availability_changeset(old_or_new, update)
-        if changeset.valid? do
-          if changeset.changes, do: changeset, else: nil
-        else
-          errors = Warehouse.ChangesetHelpers.changeset_errors(changeset)
+    # Generate changesets, validate and produce changed products
+    changed_products =
+      availability_updates
+      |> Enum.map(&Map.put(&1, "manufacturer", manufacturer))
+      |> product_changesets(products, &Product.availability_changeset/2)
+      |> Enum.filter(fn
+        {:changeset, _} -> true
+        {:product, _} -> false
+        {:error, errors} ->
           Logger.warn(module: __MODULE__, update: request, error: :invalid_data, errors: errors)
-          nil
-        end
+          false
       end)
+      |> Enum.map(fn {:changeset, cs} -> Changeset.apply_changes(cs) end)
 
-    products =
-      Enum.reduce(updates, products, fn changeset, products ->
-        product = Changeset.apply_changes(changeset)
-        Map.put(products, product.id, product)
-      end)
-
+    # update products Map
+    products = Enum.reduce(changed_products, products, &Map.put(&2, &1.id, &1))
     state = %{state | products: products}
 
     data_func = fn -> :availability_updated end
     state = reply_to_waiters(request, data_func, state)
-    # TODO: emit updates to subscribers
+
+    # broadcast updated products
+    changed_products
+    |> Enum.group_by(& &1.type)
+    |> Enum.each(fn {category, products} ->
+      PubSub.broadcast(Warehouse.PubSub, "products:#{category}",
+        {:updated_products, category, products})
+    end)
 
     {:noreply, state}
   end
@@ -228,15 +284,66 @@ defmodule ProductCache.Cache do
 
   @impl true
   def handle_info({:self_update, request}, %{update_timers: timers} = state) do
-    # TODO: only if still relevant...
-    Logger.info(module: __MODULE__, action: :self_update, request: request)
     state = %{state | update_timers: Map.delete(timers, request)}
-    state = reply_after_update(:self, request, state)
-    {:noreply, state}
+    if has_listeners?(state) do
+      Logger.info(module: __MODULE__, action: :self_update, request: request)
+      state = reply_after_update(:self, request, state)
+      {:noreply, state}
+    else
+      Logger.info(module: __MODULE__, action: :self_update, status: :stopping)
+      {:noreply, state}
+    end
+  end
+
+  @impl true
+  def handle_info({:DOWN, ref, :process, pid, _}, %{monitors: monitors} = state) do
+    monitors =
+      case Map.pop(monitors, pid) do
+        {^ref, monitors} ->
+          monitors
+
+        {monitor_ref, monitors} ->
+          Logger.warn(module: __MODULE__, action: :demonitor, message: "Wrong monitor ref. DOWN event for #{pid} with #{ref}, but expected #{monitor_ref}")
+          monitors
+
+        nil ->
+          Logger.warn(module: __MODULE__, action: :demonitor, message: "DOWN event for unknown pid #{pid} with #{ref}")
+          monitors
+      end
+    {:noreply, %{state | monitors: monitors}}
   end
 
 
-  # Private
+  ## Monitoring listeners/waiters to know when to suspend automatic updates
+
+  defp has_listeners?(%{monitors: monitors, last_heartbeat: last_heartbeat}) do
+    if not Enum.empty?(monitors) do
+      true
+    else
+      last_heartbeat_ago =
+        System.monotonic_time() - last_heartbeat
+        |> System.convert_time_unit(:native, :millisecond)
+      last_heartbeat_ago < @cache_time * 2
+    end
+  end
+
+  defp monitor_client(pid, %{monitors: monitors} = state) do
+    %{state | monitors:
+      if Map.has_key?(monitors, pid) do
+        monitors
+      else
+        ref = Process.monitor(pid)
+        Map.put(monitors, pid, ref)
+      end
+    }
+  end
+
+  defp heartbeat(state) do
+    %{state | last_heartbeat: System.monotonic_time()}
+  end
+
+
+  ## Private
 
   defp categories(%{categories: categories}) do
     categories
@@ -248,6 +355,23 @@ defmodule ProductCache.Cache do
     Map.values(products)
     |> Enum.filter(fn product -> product.type == category end)
     |> Enum.sort_by(&(&1.name))
+  end
+
+  defp product_changesets(updates, products, new_changeset \\ &Product.changeset/2) do
+    Enum.map(updates, fn update ->
+      old_or_new = Map.get(products, update["id"], %Product{})
+      changeset = new_changeset.(old_or_new, update)
+      if changeset.valid? do
+        if not Enum.empty?(changeset.changes) do
+          {:changeset, changeset}
+        else
+          {:product, changeset.data}
+        end
+      else
+        errors = Warehouse.ChangesetHelpers.changeset_errors(changeset)
+        {:error, errors}
+      end
+    end)
   end
 
   defp request_availability_updates(manufacturers, %{availability: availability} = state) do
@@ -328,13 +452,21 @@ defmodule ProductCache.Cache do
 
       {waiters, waiting} ->
         data = data_func.()
-        for from <- waiters do
-          if from != :self do
-            GenServer.reply(from, {:ok, data})
-          end
-        end
+        Enum.each(waiters, fn
+          :self -> nil
+          {:reply, from} -> GenServer.reply(from, {:ok, data})
+          {:async, pid} -> async_reply(pid, request, data)
+        end)
         %{state | waiting: waiting}
     end
+  end
+
+  defp async_reply(pid, :categories, categories) do
+    send(pid, {:categories, categories})
+  end
+
+  defp async_reply(pid, {:products, category}, products) do
+    send(pid, {:products, category, products})
   end
 
 
@@ -356,11 +488,6 @@ defmodule ProductCache.Cache do
     {downloaders, requests} = feed_downloaders(downloaders, requests)
     %{state | ready_downloaders: downloaders, request_queue: requests}
   end
-
-  #defp feed_downloaders(%{ready_downloaders: downloaders, request_queue: requests} = state) do
-  #  {downloaders, requests} = feed_downloaders(downloaders, requests)
-  #  %{state | ready_downloaders: downloaders, request_queue: requests}
-  #end
 
   defp feed_downloaders(downloaders, requests) do
     if not :queue.is_empty(downloaders) and not :queue.is_empty(requests) do

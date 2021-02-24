@@ -26,6 +26,10 @@ defmodule Warehouse.Products.Product do
     field :price, :integer
     field :manufacturer, :string
     field :availability, :string, default: ""
+
+    # this is an meta field and not really part of the data model
+    # for non embedded_schema, this matches Product.__meta__.state == :deleted
+    field :deleted, :boolean, default: false
   end
 
   def changeset(product, params \\ %{}) do

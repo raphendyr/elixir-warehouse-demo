@@ -23,4 +23,12 @@ defmodule ProductCache do
   def product(id) do
     GenServer.call(ProductCache.Cache, {:product, id})
   end
+
+  def async_categories() do
+    GenServer.cast(ProductCache.Cache, {:categories, self()})
+  end
+
+  def async_products(category) do
+    GenServer.cast(ProductCache.Cache, {:products, category, self()})
+  end
 end

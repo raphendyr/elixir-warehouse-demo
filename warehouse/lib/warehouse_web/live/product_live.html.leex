@@ -1,0 +1,56 @@
+<section class="row">
+  <div class="column">
+    <h3>Product listing by category</h3>
+    <nav>
+      <%= for category <- @categories do %>
+        <button phx-click="category" value="<%= category %>"><%= category |> String.capitalize %></button>
+      <% end %>
+    </nav>
+  </div>
+</section>
+
+<section>
+  <%= if is_nil @category do %>
+    <p>No category selected</p>
+  <% else %>
+    <h3>Products from category <%= @category %></h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Name</th>
+          <th>Price</th>
+          <th>Availability</th>
+          <th>Manufacturer</th>
+          <th>Id</th>
+          <th></th>
+        </tr>
+      </thead>
+      <%= if is_nil(@products) or Enum.empty?(@products) do %>
+        <tbody>
+          <tr>
+            <td colspan="7">
+              <%= if is_nil(@products) do %>Loading...<% else %>No products<% end %>
+            </td>
+          </tr>
+        </tbody>
+      <% else %>
+        <tbody phx-update="append">
+          <%= for product <- @products do %>
+            <tr id="product-<%= product.id %>" class="<%= if product.deleted do %>deleted<% end %>">
+              <td><%= product.type %></td>
+              <td><%= product.name %></td>
+              <td><%= product.price %></td>
+              <td><%= product.availability %></td>
+              <td><%= product.manufacturer %></td>
+              <td><%= product.id %></td>
+              <td>
+                <span><%= link "Show", to: Routes.product_path(@socket, :show, product) %></span>
+              </td>
+            </tr>
+          <% end %>
+        </tbody>
+      <% end %>
+    </table>
+  <% end %>
+</section>
