@@ -48,14 +48,23 @@ defmodule WarehouseWeb.ProductLive do
 
   @impl true
   def handle_info({:updated_products, category, products}, socket) do
-    Logger.info(module: __MODULE__, event: :updated_products, count: Enum.count(products))
-    {:noreply, schedule_product_push(:append, category, products, socket)}
+    count = Enum.count(products)
+    Logger.info(module: __MODULE__, event: :updated_products, count: count)
+    {:noreply,
+      schedule_product_push(:append, category, products, socket)
+      |> put_flash(:info, "#{count} products updated")
+    }
   end
 
   @impl true
   def handle_info({:removed_products, category, products}, socket) do
-    Logger.info(module: __MODULE__, event: :removed_products, count: Enum.count(products))
-    {:noreply, schedule_product_push(:remove, category, products, socket)}
+    count = Enum.count(products)
+    Logger.info(module: __MODULE__, event: :removed_products, count: count)
+
+    {:noreply,
+      schedule_product_push(:remove, category, products, socket)
+      |> put_flash(:error, "#{count} products removed from category")
+    }
   end
 
   @impl true
