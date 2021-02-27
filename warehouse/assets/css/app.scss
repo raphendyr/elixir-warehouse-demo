@@ -7,6 +7,24 @@
   display: none;
 }
 
+table[phx-hook='TableSortFilter'] th {
+  cursor: pointer;
+  border-radius: 4px;
+
+  &:hover {
+    background-color: #e4f4ff;
+  }
+}
+
+th.sorted-asc::after {
+  padding-left: 0.4em;
+  content: '▲';
+}
+th.sorted-desc::after {
+  padding-left: 0.4em;
+  content: '▼';
+}
+
 /* LiveView specific classes for your customizations */
 .phx-no-feedback.invalid-feedback,
 .phx-no-feedback .invalid-feedback {

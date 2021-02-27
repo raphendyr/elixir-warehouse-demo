@@ -89,7 +89,9 @@ defmodule WarehouseWeb.ProductLive do
       send(self(), :push)
     end
     update_queue =
-      Enum.chunk_every(products, 1000)
+      products
+      |> (& [&1]).() # use single chunk for now, see NOTE in handle_info(:push
+      #|> Enum.chunk_every(1000)
       |> Enum.reduce(update_queue, fn chunk, queue ->
         :queue.in({action, category, chunk}, queue)
       end)

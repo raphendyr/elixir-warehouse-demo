@@ -14,10 +14,10 @@
     <p>No category selected</p>
   <% else %>
     <h3>Products from category <%= @category %></h3>
-    <table>
+    <input type="text" placeholder="Filter products...">
+    <table id="product-table-<%= @category %>" phx-hook="TableSortFilter">
       <thead>
         <tr>
-          <th>Type</th>
           <th>Name</th>
           <th>Price</th>
           <th>Availability</th>
@@ -38,7 +38,6 @@
         <tbody phx-update="append">
           <%= for product <- @products do %>
             <tr id="product-<%= product.id %>" class="<%= if product.deleted do %>deleted<% end %>">
-              <td><%= product.type %></td>
               <td><%= product.name %></td>
               <td><%= product.price %></td>
               <td><%= product.availability %></td>
