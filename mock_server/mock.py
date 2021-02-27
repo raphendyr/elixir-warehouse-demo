@@ -1,5 +1,6 @@
+import json
 import os.path
-from flask import Flask, send_from_directory
+from flask import Flask, jsonify, safe_join, send_from_directory
 from time import sleep
 from random import random
 
@@ -8,8 +9,19 @@ api.env = "development"
 api.debug = True
 FILES = os.path.dirname(__file__)
 
+@api.route('/', methods=['GET'])
+def index():
+    return jsonify([
+        {'url': '/v2/products/{category}'},
+        {'url': '/v2/availability/{manufacturer}'},
+    ])
+
 @api.route('/v2/products/<category>', methods=['GET'])
 def products(category):
+    if random() > 0.9:
+        with open(safe_join(FILES, f'products-{category}.json')) as f:
+            data = json.load(f)
+        return jsonify(data[:5])
     return send_from_directory(FILES, filename=f'products-{category}.json')
 
 @api.route('/v2/availability/<manufacturer>', methods=['GET'])
