@@ -43,3 +43,15 @@ liveSocket.connect()
 // >> liveSocket.enableLatencySim(1000)  // enabled for duration of browser session
 // >> liveSocket.disableLatencySim()
 window.liveSocket = liveSocket
+
+// Hook TableSortFilter for non-live views
+import {TableSortFilter} from "./sorting.js"
+const productsTable = document.getElementById('products-table')
+let tsf = null
+if (productsTable !== null) {
+    tsf = new TableSortFilter(productsTable);
+}
+
+// Jdenticon for product page
+import jdenticon from "jdenticon/dist/jdenticon-module.js"
+jdenticon()

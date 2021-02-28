@@ -4,7 +4,6 @@ defmodule WarehouseWeb.PageController do
   alias Warehouse.Products
 
   def index(conn, _params) do
-    categories = Products.list_categories()
-    render(conn, "index.html", categories: categories)
+    render(conn, "index.html")
   end
 end

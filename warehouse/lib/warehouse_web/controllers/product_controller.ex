@@ -3,9 +3,19 @@ defmodule WarehouseWeb.ProductController do
 
   alias Warehouse.Products
 
-  def index(conn, %{"category" => category}) do
+  def index(conn, %{}) do
+    categories = Products.list_categories()
+    render(conn, "index.html", categories: categories)
+  end
+
+  def list(conn, %{"category" => category}) do
+    categories = Products.list_categories()
     products = Products.list_products(category)
-    render(conn, "index.html", category: category, products: products)
+    render(conn, "list.html",
+      categories: categories,
+      category: category,
+      products: products,
+    )
   end
 
   def show(conn, %{"id" => id}) do

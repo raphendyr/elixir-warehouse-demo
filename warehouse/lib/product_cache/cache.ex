@@ -50,7 +50,7 @@ defmodule ProductCache.Cache do
   # Calls from the application
 
   @impl true
-  def handle_call(:categories, from, %{categories: categories} = state) do
+  def handle_call({:categories, _opts}, from, %{categories: categories} = state) do
     Logger.info(module: __MODULE__, call: :categories)
     state = heartbeat(state)
     case categories do
@@ -60,15 +60,26 @@ defmodule ProductCache.Cache do
   end
 
   @impl true
-  def handle_call({:products, category}, from, %{categories: categories} = state) do
+  def handle_call({:products, category, opts}, from, %{categories: categories} = state) do
     Logger.info(module: __MODULE__, call: {:products, category})
     state = heartbeat(state)
-    case cache_time_elapsed?(categories, category) do
+    case cache_status(categories, category) do
       :ok ->
         {:reply, {:ok, products(category, state)}, state}
 
+      :not_yet_cached ->
+        state = reply_after_update(:self, {:products, category}, state)
+        {:reply, {:ok, nil}, state}
+
       :elapsed ->
-        {:noreply, reply_after_update({:reply, from}, {:products, category}, state)}
+        if Keyword.get(opts, :wait, true) do
+          state = reply_after_update({:reply, from}, {:products, category}, state)
+          {:noreply, state}
+        else
+          products = products(category, state)
+          state = reply_after_update(:self, {:products, category}, state)
+          {:reply, {:ok, products}, state}
+        end
 
       :missing ->
         {:reply, {:error, :unknown_category}, state}
@@ -106,7 +117,7 @@ defmodule ProductCache.Cache do
     Logger.info(module: __MODULE__, cast: request, pid: pid)
     state = monitor_client(pid, state)
     async_reply(pid, request, products(category, state))
-    if cache_time_elapsed?(categories, category) == :elapsed do
+    if cache_status(categories, category) in [:elapsed, :not_yet_cached] do
       {:noreply, reply_after_update({:async, pid}, {:products, category}, state)}
     else
       {:noreply, state}
@@ -126,19 +137,26 @@ defmodule ProductCache.Cache do
   do
     state = downloader_ready(downloader, state)
 
-    now = System.monotonic_time()
     category_times =
       categories
       |> Enum.map(fn category ->
         case List.keyfind(existing_categories, category, 0) do
           {^category, next_update} -> {category, next_update}
-          _ -> {category, now}
+          _ -> {category, nil}
         end
       end)
 
     data_func = fn -> Enum.sort(categories) end
     state = reply_to_waiters(request, data_func, state)
     state = schedule_updater(request, @cache_time, state)
+    state =
+      if Enum.empty? existing_categories do
+        # on the first startup immediately download updates
+        Enum.reduce(categories, state, &reply_after_update(:self, {:products, &1}, &2))
+      else
+        # later, ensure updates are scheduled
+        Enum.reduce(categories, state, &schedule_updater({:products, &1}, @cache_time, &2))
+      end
     {:noreply, %{state | categories: category_times}}
   end
 
@@ -376,8 +394,8 @@ defmodule ProductCache.Cache do
 
   defp request_availability_updates(manufacturers, %{availability: availability} = state) do
     Enum.reduce(manufacturers, state, fn manufacturer, state ->
-      case cache_time_elapsed?(availability, manufacturer) do
-        res when res in [:elapsed, :missing] ->
+      case cache_status(availability, manufacturer) do
+        res when res in [:elapsed, :not_yet_cached, :missing] ->
           reply_after_update(:self, {:availability, manufacturer}, state)
         _ ->
           state
@@ -400,11 +418,15 @@ defmodule ProductCache.Cache do
     end
   end
 
-  defp cache_time_elapsed?(times, key) do
+  defp cache_status(times, key) do
     case List.keyfind(times, key, 0) do
       nil -> :missing
       {^key, next_update} ->
-        if next_update > System.monotonic_time(), do: :ok, else: :elapsed
+        cond do
+          is_nil(next_update) -> :not_yet_cached
+          next_update <= System.monotonic_time() -> :elapsed
+          true -> :ok
+        end
     end
   end
 
@@ -436,7 +458,11 @@ defmodule ProductCache.Cache do
     case waiting do
       %{^request => waiters} ->
         # update underway
-        %{state | waiting: %{waiting | request => [from | waiters]}}
+        if from != :self do
+          %{state | waiting: %{waiting | request => [from | waiters]}}
+        else
+          state
+        end
 
       %{} ->
         # no active update

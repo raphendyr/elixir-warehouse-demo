@@ -1,37 +1,48 @@
-<h1>Show Product</h1>
+<h1><%= @product.name %></h1>
 
-<ul>
+<section class="row">
+  <article class="column">
+    <svg width="200" height="200" data-jdenticon-value="<%= @product.id %>"></svg>
+    <p>
+    Made by <%= @product.manufacturer %><br>
+      <%= @product.availability %>
+    </p>
+  </article>
+  <article class="column">
+    <ul>
+      <li>
+        <strong>Id:</strong>
+        <%= @product.id %>
+      </li>
+      <li>
+        <strong>Name:</strong>
+        <%= @product.name %>
+      </li>
+      <li>
+        <strong>Type:</strong>
+        <%= @product.type %>
+      </li>
+      <li>
+        <strong>Manufacturer:</strong>
+        <%= @product.manufacturer %>
+      </li>
+      <li>
+        <strong>Price:</strong>
+        <%= @product.price %>
+      </li>
+      <li>
+        <strong>Availability:</strong>
+        <%= @product.availability %>
+      </li>
+    </ul>
+  </article>
+</section>
 
-  <li>
-    <strong>Id:</strong>
-    <%= @product.id %>
-  </li>
-
-  <li>
-    <strong>Type:</strong>
-    <%= @product.type %>
-  </li>
-
-  <li>
-    <strong>Name:</strong>
-    <%= @product.name %>
-  </li>
-
-  <li>
-    <strong>Price:</strong>
-    <%= @product.price %>
-  </li>
-
-  <li>
-    <strong>Availability:</strong>
-    <%= @product.availability %>
-  </li>
-
-  <li>
-    <strong>Manufacturer:</strong>
-    <%= @product.manufacturer %>
-  </li>
-
-</ul>
-
-<span><%= link "Back", to: Routes.product_path(@conn, :index, @product.type) %></span>
+<section class="row">
+  <div class="column">
+    <%= link "Back to category #{@product.type}", to: Routes.product_path(@conn, :list, @product.type) %>
+  </div>
+  <div class="column">
+    <%= link "Back to live products", to: Routes.product_path(@conn, :live) %>
+  </div>
+</section>

@@ -10,6 +10,7 @@ defmodule Warehouse.Products do
   @doc false
   def list_categories() do
     {:ok, category_names} = ProductCache.categories()
+    # NOTE: may die to timeout
     categories = Enum.map(category_names, fn name -> %Category{name: name} end)
     categories
   end
@@ -25,20 +26,24 @@ defmodule Warehouse.Products do
   ## Examples
 
       iex> list_products("foo")
-      [%Product{}, ...]
+      [%Product{type: "foo"}, ...]
 
   """
   def list_products(category, retry \\ false) do
-    case ProductCache.products(category) do
-      {:ok, products} ->
-        products
+    try do
+      case ProductCache.products(category, wait: false, timeout: 3_000) do
+        {:ok, products} ->
+          products
 
-      {:error, :unknown_category} ->
-        if retry or not Enum.any?(list_categories(), fn cat -> cat.name == category end) do
-          []
-        else
-          list_products(category, true)
-        end
+        {:error, :unknown_category} ->
+          if retry or not Enum.any?(list_categories(), fn cat -> cat.name == category end) do
+            []
+          else
+            list_products(category, true)
+          end
+      end
+    catch
+      :exit, _ -> nil
     end
   end
 
@@ -55,7 +60,7 @@ defmodule Warehouse.Products do
   ## Examples
 
       iex> get_product!(123)
-      %Product{}
+      %Product{id: 123}
 
       iex> get_product!(456)
       ** (Warehouse.Products.NoResultsError)

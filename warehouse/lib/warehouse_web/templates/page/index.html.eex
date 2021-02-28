@@ -1,33 +1,54 @@
-<section class="phx-hero">
+<section class="card">
   <h1><%= gettext "Welcome to %{name}!", name: "Warehouse" %></h1>
 </section>
 
 <section class="row">
   <article class="column">
-    <h2>Products</h2>
+    <h2>Product Listings</h2>
     <ul>
-      <%= for category <- @categories do %>
-        <li>
-          <%= link category.name, to: Routes.product_path(@conn, :index, category) %>
-        </li>
-      <% end %>
+      <li>
+        <%= link "Products Classic", to: Routes.product_path(@conn, :index) %>
+        <p>
+        Product listing with normal web requests.
+        To receive updates, page needs to be reloaded.
+        However, this method is fast as browser can start rendering the document before the full download is complete.
+        </p>
+      </li>
+      <li>
+        <%= link "Products Live", to: Routes.product_path(@conn, :live) %>
+        <p>
+        Product listing with live updates after state change in the API.
+        This view is bit laggy sometimes due to slow DOM manipulation, but state change doesn't require reload, so that is nice.
+        I'm sure the DOM slowness could be fixed.
+        For example, Phoenix LiveView append seems to create errors and sorting algorithm is really naive.
+        Furthermore, filtering of entries could be done in chunks, so the UI wouldn't free.
+        </p>
+        <p>Ideally, this method is what I would use for service like this.</p>
+        <p>Sadly, the Bad API doesn't seem to change product fields (e.g. price or availability), which would be updated to the browser.</p>
+      </li>
     </ul>
   </article>
   <article class="column">
-    <h2>Recources & Help</h2>
-    <ul>
-      <li>
-        <a href="https://hexdocs.pm/phoenix/overview.html">Guides &amp; Docs</a>
-      </li>
-      <li>
-        <a href="https://github.com/phoenixframework/phoenix">Source</a>
-      </li>
-      <li>
-        <a href="https://github.com/phoenixframework/phoenix/blob/v1.5/CHANGELOG.md">v1.5 Changelog</a>
-      </li>
-      <li>
-        <a href="https://elixir-slackin.herokuapp.com/">Elixir on Slack</a>
-      </li>
-    </ul>
+    <h2>Notes about the service</h2>
+    <p>
+    Warehouse is a web application to demonstrate author's skills.
+    It consist of web server written using <a href="https://www.phoenixframework.org/">Phoenix Framework</a> and an active cache build using <a href="https://elixir-lang.org/">Elixir</a> <i>GenServer</i>.
+    The cache uses workers to download data from <a href="https://bad-api-assignment.reaktor.com/">bad-api-assignment.reaktor.com</a>.
+    </p>
+    <p>
+    When the cache notices changes in the data from the API, it will broadcast those changes to the cluster, which are then pushed to the browser when using the live update view.
+    In the classics case, data is retrieved from the cache within the web request.
+    </p>
+    <p>
+    All interactions with the cache trigger auto updates, which are done after cache expiration.
+    If there are no polls and no active live views, then updates are stopped.
+    </p>
   </article>
 </section>
+
+<footer>
+  <p>
+  Author: <a href="https://github.com/raphendyr">@raphendyr</a><br>
+  Source code: <a href="https://github.com/raphendyr/elixir-warehouse-demo">github.com/raphendyr/elixir-warehouse-demo</a>
+  </p>
+</footer>

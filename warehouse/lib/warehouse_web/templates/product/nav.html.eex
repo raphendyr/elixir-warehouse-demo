@@ -1,0 +1,7 @@
+<section class="row">
+  <nav class="column nav-categories">
+    <%= for category <- @categories do %>
+      <%= link String.capitalize(category.name), to: Routes.product_path(@conn, :list, category), class: (if @category == category.name, do: "active") %>
+    <% end %>
+  </nav>
+</section>

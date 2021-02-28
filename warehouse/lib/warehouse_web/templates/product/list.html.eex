@@ -1,0 +1,39 @@
+<%= render WarehouseWeb.ProductView, "nav.html", conn: @conn, categories: @categories, category: @category %>
+
+<h1>Listing Products from category <%= @category %></h1>
+
+<section>
+  <%= if is_nil(@products) or Enum.empty?(@products) do %>
+    <%= if is_nil(@products) do %>
+      <p>Products are not yet cached, reload soon.</p>
+    <% else %>
+      <p>No products found</p>
+    <% end %>
+  <% else %>
+    <input type="text" placeholder="Filter products...">
+    <table id="products-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Price</th>
+          <th>Availability</th>
+          <th>Manufacturer</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        <%= for product <- @products do %>
+          <tr id="product-<%= product.id %>">
+            <td><%= product.name %></td>
+            <td><%= product.price %></td>
+            <td><%= product.availability %></td>
+            <td><%= product.manufacturer %></td>
+            <td>
+              <span><%= link "Show", to: Routes.product_path(@conn, :show, product) %></span>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% end %>
+</section>

@@ -18,9 +18,9 @@ defmodule WarehouseWeb.Router do
     pipe_through :browser
 
     get "/", PageController, :index
-    live "/page", PageLive
-    live "/products", ProductLive
-    get "/products/:category", ProductController, :index
+    live "/products", ProductLive, :live
+    get "/category", ProductController, :index
+    get "/category/:category", ProductController, :list
     get "/product/:id", ProductController, :show
   end
 

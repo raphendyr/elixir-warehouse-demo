@@ -12,16 +12,18 @@ defmodule ProductCache do
     Return a list of availability info.
   """
 
-  def categories() do
-    GenServer.call(ProductCache.Cache, :categories)
+  def categories(opts \\ []) do
+    {timeout, opts} = Keyword.pop(opts, :timeout, 5_000)
+    GenServer.call(ProductCache.Cache, {:categories, opts}, timeout)
   end
 
-  def products(category) do
-    GenServer.call(ProductCache.Cache, {:products, category})
+  def products(category, opts \\ []) do
+    {timeout, opts} = Keyword.pop(opts, :timeout, 5_000)
+    GenServer.call(ProductCache.Cache, {:products, category, opts}, timeout)
   end
 
-  def product(id) do
-    GenServer.call(ProductCache.Cache, {:product, id})
+  def product(id, timeout \\ 5_000) do
+    GenServer.call(ProductCache.Cache, {:product, id}, timeout)
   end
 
   def async_categories() do

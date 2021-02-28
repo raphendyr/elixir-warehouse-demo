@@ -1,6 +1,5 @@
 <section class="row">
   <div class="column">
-    <h3>Product listing by category</h3>
     <nav>
       <%= for category <- @categories do %>
         <button phx-click="category" value="<%= category %>"><%= category |> String.capitalize %></button>
@@ -22,7 +21,6 @@
           <th>Price</th>
           <th>Availability</th>
           <th>Manufacturer</th>
-          <th>Id</th>
           <th></th>
         </tr>
       </thead>
@@ -42,7 +40,6 @@
               <td><%= product.price %></td>
               <td><%= product.availability %></td>
               <td><%= product.manufacturer %></td>
-              <td><%= product.id %></td>
               <td>
                 <span><%= link "Show", to: Routes.product_path(@socket, :show, product) %></span>
               </td>
