@@ -1,13 +1,25 @@
 defmodule Warehouse.Products do
   @moduledoc """
   The Products context.
+
+  In other words, this module is the web applications interface to the storage.
+
+  Typically, the storage would be SQL database for example, but Warehouse uses an active cache ProductCache.
   """
 
   alias Warehouse.Products.Category
 
   require Logger
 
-  @doc false
+  @doc """
+  Returns the list of categories
+
+  ## Examples
+
+      iex> list_categories()
+      [%Category{name: "bar"}, ...]
+
+  """
   def list_categories() do
     {:ok, category_names} = ProductCache.categories()
     # NOTE: may die to timeout
@@ -21,7 +33,7 @@ defmodule Warehouse.Products do
   end
 
   @doc """
-  Returns the list of products.
+  Returns the list of products for a category
 
   ## Examples
 

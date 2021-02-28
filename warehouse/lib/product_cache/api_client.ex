@@ -1,4 +1,17 @@
 defmodule ProductCache.ApiClient do
+  @moduledoc """
+  Caches data from the backend.
+
+  Backend
+    https://bad-api-assignment.reaktor.com/
+
+  GET /v2/products/:category
+    Return a listing of products in a given category.
+
+  GET /v2/availability/:manufacturer
+    Return a list of availability info.
+  """
+
   use Tesla, only: [:get], docs: false
 
   require Logger
