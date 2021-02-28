@@ -8,8 +8,9 @@ defmodule ProductCache.Cache do
 
   require Logger
 
-  #@cache_time 5 * 60 * 1_000 # 5 minutes in milliseconds
-  @cache_time 20 * 1_000 # 20 seconds in milliseconds
+  @cache_time 5 * 60 * 1_000 # 5 minutes in milliseconds
+  #@cache_time 20 * 1_000 # 20 seconds in milliseconds
+  @retry_time 30 * 1_000 # 30 seconds in milliseconds
 
 
   # API
@@ -295,8 +296,9 @@ defmodule ProductCache.Cache do
   @impl true
   def handle_cast({:error, downloader, request, reason}, state) do
     state = downloader_ready(downloader, state)
-    Logger.warn(module: __MODULE__, message: "request update failed", request: request)
+    Logger.warn(module: __MODULE__, message: "request update failed, will retry after #{@retry_time}ms", request: request, reason: reason)
     state = reply_to_waiters(request, (fn -> {:error, reason} end), state)
+    state = schedule_updater(request, @retry_time, state)
     {:noreply, state}
   end
 

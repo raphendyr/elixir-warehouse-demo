@@ -19,19 +19,21 @@ defmodule ProductCache.ApiClient do
   alias Tesla.Adapter.Gun
 
   adapter Gun,
-    timeout: 8_000,
+    timeout: 40_000, # bad api is sometimes really slow...
     connection_timeout: 5_000
 
   plug Tesla.Middleware.Telemetry
+  #plug Tesla.Middleware.Logger
+
   plug Tesla.Middleware.FollowRedirects
   plug Tesla.Middleware.Headers, [
-    {"user-agent", "raphendyr-warehouse/0.1.0"},
+    {"user-agent", "warehouse/0.1 (Tesla/1.3.3, Gun/2.0.0, +https://github.com/raphendyr/elixir-warehouse-demo)"},
     {"accept", "application/json"},
   ]
 
   plug Tesla.Middleware.Retry,
-    delay: 500,
-    max_retries: 10,
+    delay: 1_000,
+    max_retries: 8,
     max_delay: 5_000,
     should_retry: fn
       {:ok, %{status: status}} when status != 200 -> true
@@ -40,11 +42,12 @@ defmodule ProductCache.ApiClient do
       {:error, _} -> true
     end
 
-  #plug Tesla.Middleware.BaseUrl, "https://bad-api-assignment.reaktor.com"
-  plug Tesla.Middleware.BaseUrl, "http://127.0.0.1:5000/"
+  plug Tesla.Middleware.BaseUrl, "https://bad-api-assignment.reaktor.com"
+  #plug Tesla.Middleware.BaseUrl, "http://127.0.0.1:5000/"
   plug Tesla.Middleware.JSON
 
   def new() do
+    # NOTE: Currently, the api client doesn't contain any state, but it could be used to hold the BaseUrl for example.
     {:ok, %{}}
   end
 
