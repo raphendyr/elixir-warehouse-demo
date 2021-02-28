@@ -43,7 +43,9 @@ defmodule Warehouse.Products do
           end
       end
     catch
-      :exit, _ -> nil
+      :exit, {:timeout, {GenServer, :call, _}} ->
+        Logger.warn(module: __MODULE__, action: {:list_products, category}, exit: :timeout)
+        nil
     end
   end
 
